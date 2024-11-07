@@ -11,7 +11,8 @@ migrate = Migrate()
 # Импортируем маршруты из других модулей
 from app.routers.questions import questions_bp  # Импортируем Blueprint для вопросов.
 from app.routers.responses import response_bp  # Импортируем Blueprint для ответов.
-from app.routers.home import home_bp  #
+from app.routers.categories import category_bp # Импортируем Blueprint для категорий.
+from app.routers.home import home_bp  # Импортируем Blueprint для главной страницы.
 
 
 
@@ -36,6 +37,6 @@ def create_app():  # Определяем функцию для создания
     app.register_blueprint(home_bp)
     app.register_blueprint(questions_bp)
     app.register_blueprint(response_bp)
-
+    app.register_blueprint(category_bp)
 
     return app

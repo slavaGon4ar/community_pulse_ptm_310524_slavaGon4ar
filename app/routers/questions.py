@@ -1,73 +1,79 @@
-from flask import Blueprint, jsonify, request, make_response  # Импортируем необходимые модули из Flask
-from app.models.questions import Questions  # Импортируем модель Questions из модуля models
-from app import db  # Импортируем объект базы данных db из модуля community_app
+from flask import Blueprint, jsonify, request, make_response
+from app.models.questions import Questions, Category  # Импортируем модели Questions и Category
+from app import db
+from app.schemas.question import QuestionCreate, QuestionResponse, CategoryBase  # Импортируем схемы для сериализации и валидации
 
-# Создаем новый Blueprint для обработки вопросов с префиксом URL '/questions'
+# Создаем Blueprint для вопросов с префиксом '/questions'
 questions_bp = Blueprint('questions', __name__, url_prefix='/questions')
 
 
-@questions_bp.route('/', methods=['GET'])  # Определяем маршрут для получения всех вопросов
+@questions_bp.route('/', methods=['GET'])
 def get_all_questions():
-    questions: list[Questions] = Questions.query.all()  # Получаем все вопросы из базы данных
-    questions_data: list[dict] = [  # Формируем список словарей с данными вопросов
+    """Получение всех вопросов с информацией о категориях"""
+    questions = Questions.query.all()
+    questions_data = [
         {
-            'id': question.id,  # Добавляем ID вопроса
-            'text': question.text,  # Добавляем текст вопроса
-            'created_at': question.created_at  # Добавляем дату создания вопроса
+            'id': question.id,
+            'text': question.text,
+            'created_at': question.created_at,
+            'category': {
+                'id': question.category.id,
+                'name': question.category.name
+            } if question.category else None
         }
-        for question in questions]  # Перебираем все вопросы
-    response = make_response(jsonify(questions_data), 200)  # Формируем ответ в формате JSON с кодом 200
-    # response.headers["Custom-Header"] = "our custom header"  # Закомментированный пример добавления пользовательского заголовка
-
-    return response  # Возвращаем ответ
+        for question in questions
+    ]
+    return make_response(jsonify(questions_data), 200)
 
 
-@questions_bp.route('/add', methods=['POST'])  # Определяем маршрут для добавления нового вопроса
-def add_new_questions():
-    data = request.get_json()  # Получаем данные из запроса в формате JSON
-    if not data or 'text' not in data:  # Проверяем, что данные предоставлены и содержат текст вопроса
-        return jsonify(  # Возвращаем ошибку, если данные отсутствуют
-            {
-                'message': 'NO DATA PROVIDED'  # Сообщение об ошибке
-            }
-        ), 400  # Код ошибки 400 (Bad Request)
+@questions_bp.route('/add', methods=['POST'])
+def add_new_question():
+    """Добавление нового вопроса с указанием категории"""
+    data = request.get_json()
+    if not data or 'text' not in data:
+        return jsonify({'message': 'NO DATA PROVIDED'}), 400
 
-    question: Questions = Questions(text=data['text'])  # Создаем новый объект Questions с текстом из запроса
-    db.session.add(question)  # Добавляем новый вопрос в сессию базы данных
-    db.session.commit()  # Сохраняем изменения в базе данных
+    question_data = QuestionCreate(**data)  # Используем схему для валидации данных
+    category = Category.query.get(question_data.category_id) if question_data.category_id else None
 
-    return jsonify(  # Возвращаем успешный ответ
-        {
-            "message": "NEW QUESTION added",  # Сообщение об успешном добавлении
-            "question_id": question.id  # ID нового вопроса
-        }
-    ), 201  # Код успеха 201 (Created)
+    question = Questions(text=question_data.text, category=category)
+    db.session.add(question)
+    db.session.commit()
+
+    return jsonify({
+        "message": "NEW QUESTION added",
+        "question_id": question.id
+    }), 201
 
 
-@questions_bp.route('/<int:id>', methods=['PUT'])  # Определяем маршрут для обновления вопроса по его ID
+@questions_bp.route('/<int:id>', methods=['PUT'])
 def update_question(id):
-    """Обновление конкретного вопроса по его ID."""
-    question = Questions.query.get(id)  # Получаем вопрос из базы данных по ID
-    if question is None:  # Проверяем, существует ли вопрос
-        return jsonify({'message': "Вопрос с таким ID не найден"}), 404  # Возвращаем ошибку, если вопрос не найден
+    """Обновление вопроса по ID с поддержкой категории"""
+    question = Questions.query.get(id)
+    if question is None:
+        return jsonify({'message': "Вопрос с таким ID не найден"}), 404
 
-    data = request.get_json()  # Получаем данные из запроса в формате JSON
-    if 'text' in data:  # Проверяем, предоставлен ли текст вопроса
-        question.text = data['text']  # Обновляем текст вопроса
-        db.session.commit()  # Сохраняем изменения в базе данных
-        return jsonify({'message': f"Вопрос обновлен: {question.text}"}), 200  # Возвращаем успешный ответ
-    else:
-        return jsonify(
-            {'message': "Текст вопроса не предоставлен"}), 400  # Возвращаем ошибку, если текст не предоставлен
+    data = request.get_json()
+    if 'text' in data:
+        question.text = data['text']
+    if 'category_id' in data:
+        category = Category.query.get(data['category_id'])
+        if category:
+            question.category = category
+        else:
+            return jsonify({'message': 'Указанная категория не найдена'}), 404
+
+    db.session.commit()
+    return jsonify({'message': f"Вопрос обновлен: {question.text}"}), 200
 
 
-@questions_bp.route('/<int:id>', methods=['DELETE'])  # Определяем маршрут для удаления вопроса по его ID
+@questions_bp.route('/<int:id>', methods=['DELETE'])
 def delete_question(id):
-    """Удаление конкретного вопроса по его ID."""
-    question = Questions.query.get(id)  # Получаем вопрос из базы данных по ID
-    if question is None:  # Проверяем, существует ли вопрос
-        return jsonify({'message': "Вопрос с таким ID не найден"}), 404  # Возвращаем ошибку, если вопрос не найден
+    """Удаление вопроса по его ID"""
+    question = Questions.query.get(id)
+    if question is None:
+        return jsonify({'message': "Вопрос с таким ID не найден"}), 404
 
-    db.session.delete(question)  # Удаляем вопрос из сессии базы данных
-    db.session.commit()  # Сохраняем изменения в базе данных
-    return jsonify({'message': f"Вопрос с ID {id} удален"}), 200  # Возвращаем успешный ответ
+    db.session.delete(question)
+    db.session.commit()
+    return jsonify({'message': f"Вопрос с ID {id} удален"}), 200
